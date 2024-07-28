@@ -30,14 +30,15 @@ const RegisterURLs = (
 	identity,
 	ValidationURL,
 	ConfirmationURL,
-	type
+	cycle
 ) => {
+	console.log(cycle);
 	const mpesaApiUrl =
-		type === "sandbox-test"
-			? "https://sandbox.safaricom.co.ke/mpesa/c2b/v1/registerurl"
-			: "https://api.safaricom.co.ke/mpesa/c2b/v1/registerurl";
+		cycle === 1
+			? "https://api.safaricom.co.ke/mpesa/c2b/v1/registerurl"
+			: "https://api.safaricom.co.ke/mpesa/c2b/v2/registerurl";
 	const payload = {
-		ShortCode: identity, //business Shortcode,
+		ShortCode: `${identity}`, //business Shortcode,
 		ResponseType: "Completed",
 		ConfirmationURL,
 		ValidationURL,
@@ -53,9 +54,6 @@ const RegisterURLs = (
 			body: JSON.stringify(payload),
 		})
 			.then((response) => {
-				if (!response.ok) {
-					throw new Error("Failed to register URLs");
-				}
 				return response.json();
 			})
 			.then((data) => {
@@ -70,11 +68,6 @@ const RegisterURLs = (
 const AddOnline = (req, res) => {
 	//create a online
 	Online.create({
-		/*	key1: EncryptData(req.body.key1),
-		key2: EncryptData(req.body.key2),
-		key3: EncryptData(req.body.key3),
-		type: req.body.type,
-		identity: EncryptData(req.body.identity),*/
 		credLinker: req.credLinker,
 		instLinker: req.body.instLinker,
 		live: 1,
@@ -87,7 +80,7 @@ const AddOnline = (req, res) => {
 			req.io
 				.to(req.body.instLinker)
 				.emit("message", { ...online, messageType: "online" });
-			res.json({ online, status: 201 });
+			res.json({ online, status: 200 });
 		})
 		.catch((err) =>
 			res.json({
@@ -103,13 +96,6 @@ const EditOnline = (req, res) => {
 	})
 		.then((online) => {
 			if (online) {
-				/*online.key1 = req.body.key1 ? EncryptData(req.body.key1) : online.key1;
-				online.key3 = req.body.key3 ? EncryptData(req.body.key3) : online.key3;
-				online.key2 = req.body.key2 ? EncryptData(req.body.key2) : online.key2;
-				online.type = req.body.type ? req.body.type : online.type;
-				online.identity = req.body.identity
-					? EncryptData(req.body.identity)
-					: online.identity;*/
 				online.credLinker = req.credLinker;
 				online.trace = req.body.trace ? req.body.trace : online.trace;
 				online.live = 1;
@@ -121,12 +107,13 @@ const EditOnline = (req, res) => {
 				res.json({ status: 404, message: "Online not found" });
 			}
 		})
-		.catch((err) =>
+		.catch((err) => {
+			console.log(err);
 			res.json({
 				status: 500,
 				message: "Online couldn't be edited",
-			})
-		);
+			});
+		});
 };
 
 // Function to generate access token
@@ -168,75 +155,6 @@ const GenerateAccessToken = (req, res) => {
 	});
 };
 
-const InitiateSTKPush = (
-	accessToken,
-	amount,
-	phoneNumber,
-	CallBackURL,
-	passKey,
-	ShortCode,
-	type,
-	req,
-	res
-) => {
-	const mpesaApiUrl =
-		type === "sandbox-test"
-			? "https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest"
-			: "https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest";
-	let STKShortcode = type === "sandbox-test" ? "174379" : `${ShortCode}`;
-	const timestamp = new Date()
-		.toISOString()
-		.replace(/[^0-9]/g, "")
-		.slice(0, -3);
-	const password = Buffer.from(STKShortcode + passKey + timestamp).toString(
-		"base64"
-	);
-
-	const payload = {
-		BusinessShortCode: STKShortcode,
-		Password: password,
-		Timestamp: timestamp,
-		TransactionType: "CustomerPayBillOnline",
-		Amount: `${amount}`,
-		PartyA: phoneNumber,
-		PartyB: STKShortcode,
-		PhoneNumber: phoneNumber,
-		CallBackURL: CallBackURL,
-		AccountReference: `${type}`,
-		TransactionDesc: "Test Payment",
-	};
-
-	return new Promise((resolve, reject) => {
-		fetch(mpesaApiUrl, {
-			method: "POST",
-			headers: {
-				Authorization: "Bearer " + accessToken,
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify(payload),
-		})
-			.then((response) => {
-				if (!response.ok) {
-					throw new Error("Failed to initiate STK push");
-				} else if (type === "live-add") {
-					AddOnline(req, res);
-				} else if (type === "live-edit") {
-					EditOnline(req, res);
-				}
-			})
-			.then((data) => {
-				resolve(data);
-			})
-			.catch((error) => {
-				res.json({
-					status: 500,
-					message: "Transaction failed to initiate",
-				});
-				reject(error);
-			});
-	});
-};
-
 // Function to handle expected responses
 const HandleResponse = (response) => {
 	console.log("Response:", response);
@@ -245,42 +163,44 @@ const HandleResponse = (response) => {
 
 //mpesa registration
 router.post("/register/:type", verifyToken, verifyAdmin, (req, res) => {
+	InitiateRegister(req, res, 1);
+});
+
+const InitiateRegister = (req, res, cycle) => {
 	// GetAccessToken(STKPush, req, res);
 	GenerateAccessToken(req, res)
-		.then((accessToken) => {
-			return InitiateSTKPush(
-				accessToken,
-				req.body.amount,
-				req.body.phone,
-				`https://me.com/online-pay/verify-push/${req.userId}`,
-				req.body.key3,
-				req.body.identity,
-				req.params.type,
-				req,
-				res
-			);
-		})
-		.then((stkPushResponse) => {
-			// Handle STK push response
-			HandleResponse(stkPushResponse);
-
-			return RegisterURLs(
+		.then(async (accessToken) => {
+			return await RegisterURLs(
 				accessToken,
 				req.body.identity,
-				`https://me.com/online-pay/validate/${req.body.instLinker}`,
-				`https://me.com/online-pay/confirm/${req.body.instLinker}`,
-				req.params.type
+				`https://financeapi.techsystem.world/verify-pay/validate/${req.body.instLinker}`,
+				`https://financeapi.techsystem.world/verify-pay/confirm/${req.body.instLinker}`,
+				cycle
 			);
 		})
-		.then((RegisterURLsResponse) => {
-			console.log("Register URLs response:", RegisterURLsResponse);
+		.then((response) => {
 			// Handle register url response
-			HandleResponse(RegisterURLsResponse);
+			HandleResponse(response);
+
+			if (response.ResponseCode !== "0") {
+				if (cycle === 1) {
+					InitiateRegister(req, res, 2);
+				} else {
+					throw new Error("Failed to register urls");
+				}
+			} else if (req.body.type === "live-add") {
+				AddOnline(req, res);
+			} else if (req.body.type === "live-edit") {
+				EditOnline(req, res);
+			} else {
+				res.json({ status: 200 });
+			}
 		})
 		.catch((error) => {
+			res.json({ status: 500 });
 			console.error("Error:", error);
 		});
-});
+};
 
 //mpesa verify
 router.post("/verify-push/:userId", (req, res) => {
@@ -293,6 +213,12 @@ router.post("/verify-push/:userId", (req, res) => {
 	const mpesaReceiptNumber = callbackMetadata.Item[1].Value;
 	const transactionDate = callbackMetadata.Item[2].Value;
 	const phoneNumber = callbackMetadata.Item[3].Value;
+	// Send a success response if the transaction is valid
+	const successResponse = {
+		ResultCode: 0,
+		ResultDesc: "Accepted",
+	};
+	res.json(successResponse);
 	req.io
 		.to(req.params.userId)
 		.emit("message", { data: req.body.Body, messageType: "sub" });
@@ -315,6 +241,25 @@ router.post("/get", verifyToken, (req, res) => {
 				message: "Unknown error",
 			})
 		);
+});
+
+//mpesa validation
+router.post("/validate/:instLinker", (req, res) => {
+	// Send a success response if the transaction is valid
+	const successResponse = {
+		ResultCode: 0,
+		ResultDesc: "Accepted",
+	};
+	res.json(successResponse);
+});
+
+//mpesa confirmation
+router.post("/confirm/:instLinker", (req, res) => {
+	const successResponse = {
+		ResultCode: 0,
+		ResultDesc: "Accepted",
+	};
+	res.json(successResponse);
 });
 
 module.exports = router;

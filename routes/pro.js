@@ -317,7 +317,6 @@ router.post("/verify-online/:type/:softwareId", (req, res) => {
 	const phoneNumber = callbackMetadata.Item[3].Value;
 
 	req.body.softwareId = req.params.softwareId;
-	req.body.amount = parseInt(amount / 130.345069); //parseInt(amount) === 15000 ? 99 : 29;
 	req.body.transaction = mpesaReceiptNumber;
 	req.body.country = `Kenya-${phoneNumber}`;
 	req.body.by = "mpesa";
@@ -332,6 +331,7 @@ router.post("/verify-online/:type/:softwareId", (req, res) => {
 	FetchExchanges()
 		.then((data) => {
 			if (data.rates) {
+				req.body.amount = amount / data.rates["KES"];
 				AgentCommisionV2(
 					amount / data.rates["KES"],
 					req.params.softwareId,
